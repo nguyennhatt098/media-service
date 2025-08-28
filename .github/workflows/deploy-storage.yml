@@ -39,13 +39,18 @@ jobs:
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
+          echo "Kubeconfig first 3 lines:"
+          head -3 ~/.kube/config
+          echo "Checking kubeconfig syntax:"
+          kubectl config view --minify
 
       - name: Ensure namespace exists
         run: |
-          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+          timeout 60 kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Apply Backend Deployment Manifest
         run: |
+          timeout 120 bash -c '
           cat <<EOF | kubectl apply -n ${{ env.NAMESPACE }} -f -
           apiVersion: apps/v1
           kind: Deployment
@@ -70,10 +75,10 @@ jobs:
                     image: ${{ env.IMAGE_BACKEND }}:latest
                     imagePullPolicy: Always
                     ports:
-                      - containerPort: 3005
+                      - containerPort: 3015
                     env:
                       - name: PORT
-                        value: "3005"
+                        value: "3015"
                       - name: NODE_ENV
                         value: "production"
                       - name: UPLOAD_PATH
@@ -99,12 +104,19 @@ jobs:
             selector:
               app: storage-backend
             ports:
-              - port: 3005
-                targetPort: 3005
+              - port: 3015
+                targetPort: 3015
                 protocol: TCP
           EOF
+          '
 
       - name: Update Backend image and rollout
         run: |
-          kubectl set image deployment/storage-backend-deployment storage-backend=${{ env.IMAGE_BACKEND }}:latest -n ${{ env.NAMESPACE }}
-          kubectl rollout status deployment/storage-backend-deployment -n ${{ env.NAMESPACE }}
+          echo "Setting image..."
+          timeout 60 kubectl set image deployment/storage-backend-deployment storage-backend=${{ env.IMAGE_BACKEND }}:latest -n ${{ env.NAMESPACE }}
+          echo "Waiting for rollout..."
+          timeout 300 kubectl rollout status deployment/storage-backend-deployment -n ${{ env.NAMESPACE }} --timeout=300s
+          echo "Checking pods status..."
+          kubectl get pods -n ${{ env.NAMESPACE }}
+          echo "Checking deployment status..."
+          kubectl describe deployment storage-backend-deployment -n ${{ env.NAMESPACE }}
