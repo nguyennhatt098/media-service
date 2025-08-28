@@ -8,7 +8,6 @@ env:
   REGISTRY: ghcr.io
   IMAGE_BACKEND: ghcr.io/${{ github.repository }}-storage
   NAMESPACE: storage-service
-  STORAGE_PATH: /mnt/storage-service/uploads
 
 jobs:
   build-and-deploy-backend:
@@ -31,6 +30,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./Dockerfile
           push: true
           tags: ${{ env.IMAGE_BACKEND }}:latest
 
@@ -82,12 +82,12 @@ jobs:
                     args:
                       - npm run start:prod
                     volumeMounts:
-                      - name: storage-volume
+                      - name: storage-uploads-volume
                         mountPath: /app/uploads
                 volumes:
-                  - name: storage-volume
+                  - name: storage-uploads-volume
                     hostPath:
-                      path: ${{ env.STORAGE_PATH }}
+                      path: /mnt/storage-service/uploads
                       type: DirectoryOrCreate
           ---
           apiVersion: v1
