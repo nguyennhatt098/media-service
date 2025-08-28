@@ -48,6 +48,15 @@ jobs:
         run: |
           timeout 60 kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Create GHCR pull secret
+        run: |
+          kubectl create secret docker-registry ghcr-secret \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GHCR_PAT }} \
+            --docker-email=${{ github.actor }}@users.noreply.github.com \
+            -n ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Apply Backend Deployment Manifest
         run: |
           timeout 120 bash -c '
