@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
+import sharp from 'sharp';
 import { FileUploadResponseDto } from './dto/file-upload-response.dto';
 
 @Injectable()
@@ -41,6 +42,69 @@ export class StorageService {
     return validExtensions.includes(extension);
   }
 
+  private async optimizeImage(buffer: Buffer, originalName: string): Promise<{ buffer: Buffer; extension: string }> {
+    const originalExt = this.getFileExtension(originalName);
+    const quality = parseInt(process.env.IMAGE_QUALITY || '85');
+    const maxWidth = parseInt(process.env.MAX_IMAGE_WIDTH || '1920');
+    const convertToWebP = process.env.CONVERT_TO_WEBP === 'true';
+    
+    try {
+      let optimizedBuffer: Buffer;
+      let finalExtension = originalExt;
+
+      // Chuyển đổi sang WebP cho compression tốt nhất (trừ GIF để giữ animation)
+      if (originalExt === '.gif') {
+        // GIF giữ nguyên để bảo toàn animation
+        optimizedBuffer = buffer;
+      } else {
+        // Optimize và chuyển sang WebP hoặc JPEG
+        const sharpInstance = sharp(buffer);
+        const metadata = await sharpInstance.metadata();
+        
+        // Resize trước nếu ảnh quá lớn
+        let processedInstance = sharpInstance;
+        if (metadata.width && metadata.width > maxWidth) {
+          processedInstance = sharpInstance.resize({ 
+            width: maxWidth, 
+            withoutEnlargement: true,
+            fit: 'inside'
+          });
+        }
+        
+        if (convertToWebP && (metadata.hasAlpha || originalExt === '.png')) {
+          // PNG với alpha channel -> WebP
+          optimizedBuffer = await processedInstance
+            .webp({ quality, effort: 6, lossless: false })
+            .toBuffer();
+          finalExtension = '.webp';
+        } else if (convertToWebP && ['.jpg', '.jpeg'].includes(originalExt)) {
+          // JPEG -> WebP
+          optimizedBuffer = await processedInstance
+            .webp({ quality, effort: 6 })
+            .toBuffer();
+          finalExtension = '.webp';
+        } else {
+          // Fallback to optimized JPEG
+          optimizedBuffer = await processedInstance
+            .jpeg({ quality, progressive: true, mozjpeg: true })
+            .toBuffer();
+          finalExtension = '.jpg';
+        }
+      }
+
+      const originalSize = buffer.length;
+      const optimizedSize = optimizedBuffer.length;
+      const compressionRatio = ((originalSize - optimizedSize) / originalSize * 100).toFixed(1);
+      
+      console.log(`Image optimized: ${originalName} (${originalSize} -> ${optimizedSize} bytes, ${compressionRatio}% saved)`);
+
+      return { buffer: optimizedBuffer, extension: finalExtension };
+    } catch (error) {
+      console.log('Image optimization failed, using original:', error.message);
+      return { buffer, extension: originalExt };
+    }
+  }
+
   async uploadFile(
     file: Express.Multer.File,
     projectName: string,
@@ -66,13 +130,20 @@ export class StorageService {
     const filePath = path.join(projectPath, fileName);
     
     try {
-      // Lưu file
-      fs.writeFileSync(filePath, file.buffer);
+      // Optimize ảnh trước khi lưu
+      const { buffer: optimizedBuffer, extension: finalExtension } = await this.optimizeImage(file.buffer, file.originalname);
+      
+      // Cập nhật tên file với extension đã optimize
+      const optimizedFileName = `${uuidv4()}${finalExtension}`;
+      const optimizedFilePath = path.join(projectPath, optimizedFileName);
+      
+      // Lưu file đã optimize
+      fs.writeFileSync(optimizedFilePath, optimizedBuffer);
       
       // Tạo relative path để trả về
-      let relativePath = path.join(projectName, fileName);
+      let relativePath = path.join(projectName, optimizedFileName);
       if (folder) {
-        relativePath = path.join(projectName, folder, fileName);
+        relativePath = path.join(projectName, folder, optimizedFileName);
       }
       
       // Chuẩn hóa path separator cho URL
@@ -80,11 +151,11 @@ export class StorageService {
 
       return {
         success: true,
-        message: 'File uploaded successfully',
+        message: 'File uploaded and optimized successfully',
         filePath: `${process.env.BASE_URL}/api/storage/files/${urlPath}`,
-        fileName: fileName,
+        fileName: optimizedFileName,
         originalName: file.originalname,
-        fileSize: file.size,
+        fileSize: optimizedBuffer.length,
         projectName: projectName,
         uploadDate: new Date(),
       };

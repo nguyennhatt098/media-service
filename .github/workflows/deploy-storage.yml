@@ -98,6 +98,18 @@ jobs:
                         value: "jpg,jpeg,png,gif,bmp,webp"
                       - name: BASE_URL
                         value: "https://media.nefyo.com"
+                      - name: IMAGE_QUALITY
+                        value: "85"
+                      - name: MAX_IMAGE_WIDTH
+                        value: "1920"
+                      - name: CONVERT_TO_WEBP
+                        value: "true"
+                      - name: MAX_FILE_SIZE
+                        value: "10485760"
+                      - name: ALLOWED_FILE_TYPES
+                        value: "jpg,jpeg,png,gif,bmp,webp"
+                      - name: BASE_URL
+                        value: "https://media.nefyo.com"
                     command: ["/bin/sh", "-c"]
                     args:
                       - npm run start:prod
